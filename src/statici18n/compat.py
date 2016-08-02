@@ -6,7 +6,11 @@ import gettext as gettext_module
 from django import http
 from django.conf import settings
 from django.template import Context, Template
-from django.utils import importlib
+try:
+    # Python >= 3.1
+    from importlib import import_module
+except ImportError:
+    from django.utils.importlib import import_module
 from django.utils.translation import to_locale
 from django.utils.encoding import smart_text
 from django.utils.formats import get_format_modules, get_format

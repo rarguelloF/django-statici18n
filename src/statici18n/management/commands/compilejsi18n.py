@@ -4,14 +4,19 @@ import io
 import os
 from optparse import make_option
 
-from django.core.management.base import NoArgsCommand
+import django
+if django.VERSION >= (1, 9):
+    # Django >= 1.9
+    from django.core.management.base import BaseCommand
+else:
+    # Django <= 1.9
+    from django.core.management.base import NoArgsCommand as BaseCommand
 from django.utils.translation import to_locale, activate
 from django.utils.encoding import force_text
 
 from statici18n.conf import settings
 from statici18n.utils import get_filename
 
-import django
 if django.VERSION >= (1, 6):
     # Django >= 1.6
     from django.views.i18n import (get_javascript_catalog,
@@ -22,8 +27,42 @@ else:
                                    render_javascript_catalog)
 
 
-class Command(NoArgsCommand):
-    option_list = NoArgsCommand.option_list + (
+def command_handle(self, **options):
+    locale = options.get('locale')
+    domain = options['domain']
+    packages = options['packages'] or settings.STATICI18N_PACKAGES
+    outputdir = options['outputdir']
+    verbosity = int(options.get('verbosity'))
+
+    if locale is not None:
+        languages = [locale]
+    else:
+        languages = [to_locale(lang_code)
+                     for (lang_code, lang_name) in settings.LANGUAGES]
+
+    if outputdir is None:
+        outputdir = os.path.join(settings.STATICI18N_ROOT,
+                                 settings.STATICI18N_OUTPUT_DIR)
+
+    for locale in languages:
+        if verbosity > 0:
+            self.stdout.write("processing language %s\n" % locale)
+
+        jsfile = os.path.join(outputdir, get_filename(locale, domain))
+        basedir = os.path.dirname(jsfile)
+        if not os.path.isdir(basedir):
+            os.makedirs(basedir)
+
+        activate(locale)
+        catalog, plural = get_javascript_catalog(locale, domain, packages)
+        response = render_javascript_catalog(catalog, plural)
+
+        with io.open(jsfile, "w", encoding="utf-8") as fp:
+            fp.write(force_text(response.content))
+
+
+class Command(BaseCommand):
+    option_list = BaseCommand.option_list + (
         make_option('--locale', '-l', dest='locale',
                     help="The locale to process. Default is to process all."),
         make_option('-d', '--domain',
@@ -42,39 +81,13 @@ class Command(NoArgsCommand):
     help = "Collect Javascript catalog files in a single location."
 
     def __init__(self):
-        super(NoArgsCommand, self).__init__()
+        super(BaseCommand, self).__init__()
         if hasattr(self, 'requires_system_checks'):
             self.requires_system_checks = False
 
-    def handle_noargs(self, **options):
-        locale = options.get('locale')
-        domain = options['domain']
-        packages = options['packages'] or settings.STATICI18N_PACKAGES
-        outputdir = options['outputdir']
-        verbosity = int(options.get('verbosity'))
-
-        if locale is not None:
-            languages = [locale]
-        else:
-            languages = [to_locale(lang_code)
-                         for (lang_code, lang_name) in settings.LANGUAGES]
-
-        if outputdir is None:
-            outputdir = os.path.join(settings.STATICI18N_ROOT,
-                                     settings.STATICI18N_OUTPUT_DIR)
-
-        for locale in languages:
-            if verbosity > 0:
-                self.stdout.write("processing language %s\n" % locale)
-
-            jsfile = os.path.join(outputdir, get_filename(locale, domain))
-            basedir = os.path.dirname(jsfile)
-            if not os.path.isdir(basedir):
-                os.makedirs(basedir)
-
-            activate(locale)
-            catalog, plural = get_javascript_catalog(locale, domain, packages)
-            response = render_javascript_catalog(catalog, plural)
-
-            with io.open(jsfile, "w", encoding="utf-8") as fp:
-                fp.write(force_text(response.content))
+if django.VERSION >= (1, 9):
+    # Django >= 1.9
+    Command.handle = command_handle
+else:
+    # Django <= 1.9
+    Command.handle_noargs = command_handle
